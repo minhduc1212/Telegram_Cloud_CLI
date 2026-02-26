@@ -2,10 +2,12 @@
 #  Telegram Cloud Storage  ·  Telethon-based CLI tool
 # ============================================================
 
+import asyncio
 import os
 import sys
 from telethon import TelegramClient
 from dotenv import load_dotenv
+from telethon.errors import FloodWaitError
 
 #Config
 load_dotenv()
@@ -44,9 +46,14 @@ async def upload(file_path: str, caption: str = "") -> int | None:
             SAVED, file_path,
             caption=caption,
             progress_callback=progress,
+            workers=8,
         )
         print(f"\n  ✅  Done!  Message ID: {msg.id}")
         return msg.id
+    except FloodWaitError as e:
+        print(f"\n  ⏳  FloodWait: chờ {e.seconds}s ...")
+        await asyncio.sleep(e.seconds)
+        return await upload(file_path, caption)
     except Exception as e:
         print(f"\n  ❌  Upload failed: {e}")
         return None
@@ -80,15 +87,26 @@ async def update(message_id: int, new_file_path: str) -> None:
 
     print(f"  🔄  Updating message {message_id} ...")
     try:
+       
+        print(f"  ⬆️  Uploading new file ...")
+        tmp_msg = await client.send_file(
+            SAVED, new_file_path,
+            workers=8,
+            progress_callback=progress,
+        )
+
+        print(f"\n  ✏️  Replacing message ...")
         await client.edit_message(
             SAVED, message_id,
-            file=new_file_path,
+            file=tmp_msg.media,
             text=f"Updated: {os.path.basename(new_file_path)}",
         )
+
+        #delete message
+        await tmp_msg.delete()
         print("  ✅  Update successful!")
     except Exception as e:
-        print(f"  ❌  Update failed: {e}")
-
+        print(f"\n  ❌  Update failed: {e}")
 
 async def list_files() -> None:
     """List all messages with media in Saved Messages."""
@@ -133,25 +151,26 @@ async def main() -> None:
     print("║   Telegram Cloud Storage     ║")
     print("╚══════════════════════════════╝\n")
 
-    for i, (label, _) in enumerate(MENU, 1):
-        print(f"  {i}.  {label}")
+    while True:
+        for i, (label, _) in enumerate(MENU, 1):
+            print(f"  {i}.  {label}")
 
-    print()
-    choice = input("  Choice: ").strip()
+        print()
+        choice = input("  Choice: ").strip()
 
-    if not choice.isdigit() or not (1 <= int(choice) <= len(MENU)):
-        print("  ❌  Invalid choice.")
-        sys.exit(1)
+        if not choice.isdigit() or not (1 <= int(choice) <= len(MENU)):
+            print("  ❌  Invalid choice.")
+            continue
 
-    label, handler = MENU[int(choice) - 1]
+        label, handler = MENU[int(choice) - 1]
 
-    if handler is None:          # Exit
-        print("  👋  Bye!")
-        return
+        if handler is None:          # Exit
+            print("  👋  Bye!")
+            return
 
-    print()
-    await handler()
-    print()
+        print()
+        await handler()
+        print()
 
 
 with client:
